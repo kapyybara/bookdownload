@@ -143,7 +143,6 @@ const createPDF = async () => {
       const pageWidth = pdf.internal.pageSize.getWidth()
       const pageHeight = pdf.internal.pageSize.getHeight()
       const imgRatio = img.width / img.height
-      const pageRatio = pageWidth / pageHeight
       
       let finalWidth = pageWidth
       let finalHeight = pageWidth / imgRatio
