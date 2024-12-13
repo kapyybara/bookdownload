@@ -38,12 +38,17 @@
     <button @click="startDownload" :disabled="state.isDownloading">
       {{ state.isDownloading ? 'Đang tải...' : 'Bắt đầu tải' }}
     </button>
+
+    <button @click="createPDF" :disabled="!canCreatePDF">
+      {{ state.isCreatingPDF ? 'Đang tạo PDF...' : 'Tạo file PDF' }}
+    </button>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import axios from 'axios'
+import jsPDF from 'jspdf'
 
 interface DownloadState {
   baseURL: string
@@ -54,6 +59,8 @@ interface DownloadState {
   isDownloading: boolean
   currentProgress: number
   failedPages: number[]
+  downloadedImages: Blob[]
+  isCreatingPDF: boolean
 }
 
 const state = ref<DownloadState>({
@@ -64,11 +71,17 @@ const state = ref<DownloadState>({
   batchSize: 5,
   isDownloading: false,
   currentProgress: 0,
-  failedPages: []
+  failedPages: [],
+  downloadedImages: [],
+  isCreatingPDF: false
 })
 
 const progressPercent = computed(() => {
   return (state.value.currentProgress / state.value.totalPages) * 100
+})
+
+const canCreatePDF = computed(() => {
+  return state.value.downloadedImages.length > 0 && !state.value.isDownloading
 })
 
 const downloadPage = async (pageNumber: number): Promise<boolean> => {
@@ -81,6 +94,8 @@ const downloadPage = async (pageNumber: number): Promise<boolean> => {
     })
 
     const blob = new Blob([response.data], { type: 'image/png' })
+    state.value.downloadedImages[pageNumber - 1] = blob
+    
     const downloadUrl = window.URL.createObjectURL(blob)
     const link = document.createElement('a')
     link.href = downloadUrl
@@ -103,6 +118,70 @@ const downloadBatch = async (pages: number[]): Promise<boolean[]> => {
   return Promise.all(pages.map(page => downloadPage(page)))
 }
 
+const createPDF = async () => {
+  if (state.value.downloadedImages.length === 0) {
+    alert('Không có ảnh để tạo PDF!')
+    return
+  }
+
+  state.value.isCreatingPDF = true
+
+  try {
+    const pdf = new jsPDF()
+    
+    for (let i = 0; i < state.value.downloadedImages.length; i++) {
+      const blob = state.value.downloadedImages[i]
+      if (!blob) continue
+
+      const imgUrl = URL.createObjectURL(blob)
+      const img = await loadImage(imgUrl)
+      
+      if (i > 0) {
+        pdf.addPage()
+      }
+
+      const pageWidth = pdf.internal.pageSize.getWidth()
+      const pageHeight = pdf.internal.pageSize.getHeight()
+      const imgRatio = img.width / img.height
+      const pageRatio = pageWidth / pageHeight
+      
+      let finalWidth = pageWidth
+      let finalHeight = pageWidth / imgRatio
+      
+      if (finalHeight > pageHeight) {
+        finalHeight = pageHeight
+        finalWidth = pageHeight * imgRatio
+      }
+
+      pdf.addImage(img, 'PNG', 
+        (pageWidth - finalWidth) / 2, 
+        (pageHeight - finalHeight) / 2, 
+        finalWidth, 
+        finalHeight
+      )
+
+      URL.revokeObjectURL(imgUrl)
+    }
+
+    pdf.save(`book_${state.value.docId}.pdf`)
+    alert('Tạo PDF thành công!')
+  } catch (error) {
+    console.error('Lỗi khi tạo PDF:', error)
+    alert('Có lỗi xảy ra khi tạo PDF!')
+  } finally {
+    state.value.isCreatingPDF = false
+  }
+}
+
+const loadImage = (url: string): Promise<HTMLImageElement> => {
+  return new Promise((resolve, reject) => {
+    const img = new Image()
+    img.onload = () => resolve(img)
+    img.onerror = reject
+    img.src = url
+  })
+}
+
 const startDownload = async (): Promise<void> => {
   if (!state.value.docId || !state.value.subfolder) {
     alert('Vui lòng nhập đầy đủ thông tin!')
@@ -112,6 +191,7 @@ const startDownload = async (): Promise<void> => {
   state.value.isDownloading = true
   state.value.currentProgress = 0
   state.value.failedPages = []
+  state.value.downloadedImages = []
 
   const pages = Array.from({ length: state.value.totalPages }, (_, i) => i + 1)
   const batches: number[][] = []
@@ -196,5 +276,9 @@ button:disabled {
 .status {
   margin: 15px 0;
   text-align: center;
+}
+
+button + button {
+  margin-top: 10px;
 }
 </style> 
